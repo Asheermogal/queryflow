@@ -92,7 +92,7 @@ def render_sidebar(db: Database) -> dict:
         id_to_display = {m.id: m.display for m in models}
 
         # Default to first model, or previously chosen if still valid
-        default_model = st.session_state.get(f"model__{provider_id}")
+        default_model = st.session_state.get(f"model_v3__{provider_id}")
         if default_model not in model_ids:
             default_model = model_ids[0] if model_ids else None
 
@@ -104,7 +104,7 @@ def render_sidebar(db: Database) -> dict:
             key="model_select",
             label_visibility="collapsed",
         )
-        st.session_state[f"model__{provider_id}"] = model_id
+        st.session_state[f"model_v3__{provider_id}"] = model_id
 
         # Refresh button to re-pull the live list
         if st.button("↻ Refresh model list", key="btn_refresh_models", use_container_width=True, type="secondary"):
