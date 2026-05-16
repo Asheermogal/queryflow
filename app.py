@@ -31,6 +31,7 @@ from ui.query_flow import (
     render_starter_questions,
 )
 from ui.sidebar import render_sidebar
+from ui.sidebar_toggle import inject_sidebar_toggle
 from ui.styles import inject_global_styles
 
 
