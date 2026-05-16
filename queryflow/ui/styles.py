@@ -1,8 +1,6 @@
 """
 Global CSS injection. Overrides Streamlit defaults to enforce the design system
 from core/design.py. Pulls fonts from Google Fonts.
-
-Every visual decision routes through here so the look is consistent and tunable.
 """
 from __future__ import annotations
 
@@ -62,17 +60,44 @@ def inject_global_styles() -> None:
         display: none !important;
       }}
 
-      /* Tighten main container */
+      /* Widen the main container to use full screen, with breathing room */
       .main .block-container {{
-        max-width: 1080px;
-        padding-top: {Space.x4};
-        padding-bottom: {Space.x16};
+        max-width: 100% !important;
+        padding-left: {Space.x8} !important;
+        padding-right: {Space.x8} !important;
+        padding-top: {Space.x6} !important;
+        padding-bottom: {Space.x16} !important;
       }}
 
-      /* Hide Streamlit's "running" indicator spinner top-right (we have our own) */
-      [data-testid="stStatusWidget"] {{ display: none; }}
+      /* Sidebar — keep the collapse arrow always visible */
+      section[data-testid="stSidebar"] {{
+        background: var(--c-surface) !important;
+        border-right: 1px solid var(--c-border) !important;
+      }}
+      section[data-testid="stSidebar"] .block-container {{
+        padding-top: {Space.x4};
+      }}
+      /* Make the sidebar collapse/expand toggle highly visible and persistent */
+      [data-testid="stSidebarCollapsedControl"],
+      [data-testid="collapsedControl"] {{
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        position: fixed !important;
+        top: 12px !important;
+        left: 12px !important;
+        z-index: 9999 !important;
+      }}
+      [data-testid="stSidebarCollapsedControl"] button,
+      [data-testid="collapsedControl"] button {{
+        background: var(--c-surface) !important;
+        border: 1px solid var(--c-border) !important;
+        border-radius: var(--r-sm) !important;
+        padding: 8px 10px !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.06) !important;
+      }}
 
-      /* ── Typography helpers ───────────────────────────────────────── */
+      /* ── Typography ────────────────────────────────────────────────── */
       h1, h2, h3, h4, h5, h6 {{
         font-family: var(--f-display);
         font-weight: 400;
@@ -81,50 +106,11 @@ def inject_global_styles() -> None:
         margin-bottom: {Space.x2};
       }}
 
-      .label {{
-        font-family: var(--f-body);
-        font-size: {Size.xs}px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--c-ink-muted);
-        font-weight: 500;
-      }}
-
-      .mono {{ font-family: var(--f-mono); }}
-
       /* ── Streamlit overrides ──────────────────────────────────────── */
 
-      /* Buttons */
-      .stButton > button {{
-        background: var(--c-ink) !important;
-        color: var(--c-ink-on-dark) !important;
-        border: 1px solid var(--c-ink) !important;
-        border-radius: var(--r-sm) !important;
-        font-family: var(--f-body) !important;
-        font-size: {Size.sm}px !important;
-        font-weight: 500 !important;
-        letter-spacing: 0.02em !important;
-        padding: 8px 16px !important;
-        transition: opacity 0.15s !important;
-        box-shadow: none !important;
-        line-height: 1.4 !important;
-      }}
-      .stButton > button:hover {{
-        opacity: 0.85;
-      }}
-      .stButton > button:focus {{
-        outline: 2px solid var(--c-accent-soft) !important;
-        outline-offset: 2px !important;
-      }}
-      /* Secondary button variant */
-      .stButton.btn-secondary > button, button[kind="secondary"] {{
-        background: transparent !important;
-        color: var(--c-ink) !important;
-        border: 1px solid var(--c-border) !important;
-      }}
-
-      /* Text inputs */
-      .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] > div {{
+      /* Inputs */
+      .stTextInput input, .stTextArea textarea,
+      .stSelectbox div[data-baseweb="select"] > div {{
         background: var(--c-surface) !important;
         border: 1px solid var(--c-border) !important;
         border-radius: var(--r-sm) !important;
@@ -138,18 +124,13 @@ def inject_global_styles() -> None:
         border-color: var(--c-ink) !important;
         outline: none !important;
       }}
-
-      /* SQL editor variant (dark) */
-      .sql-editor textarea {{
-        background: var(--c-surface-dark) !important;
-        color: #e8e6d8 !important;
+      /* SQL editor uses monospace */
+      .stTextArea textarea {{
         font-family: var(--f-mono) !important;
         font-size: 13px !important;
-        line-height: 1.6 !important;
-        border: 1px solid var(--c-surface-dark) !important;
+        line-height: 1.55 !important;
       }}
 
-      /* Selectbox */
       .stSelectbox label, .stTextInput label, .stTextArea label, .stFileUploader label {{
         font-size: {Size.xs}px !important;
         text-transform: uppercase !important;
@@ -158,13 +139,44 @@ def inject_global_styles() -> None:
         font-weight: 500 !important;
       }}
 
-      /* Sidebar */
-      section[data-testid="stSidebar"] {{
-        background: var(--c-surface) !important;
-        border-right: 1px solid var(--c-border) !important;
+      /* Buttons — primary (filled dark) */
+      .stButton > button[kind="primary"] {{
+        background: var(--c-ink) !important;
+        color: var(--c-ink-on-dark) !important;
+        border: 1px solid var(--c-ink) !important;
+        border-radius: var(--r-sm) !important;
+        font-family: var(--f-body) !important;
+        font-size: {Size.sm}px !important;
+        font-weight: 500 !important;
+        letter-spacing: 0.02em !important;
+        padding: 8px 16px !important;
+        box-shadow: none !important;
+        line-height: 1.4 !important;
+        transition: opacity 0.15s !important;
       }}
-      section[data-testid="stSidebar"] .block-container {{
-        padding-top: {Space.x4};
+      .stButton > button[kind="primary"]:hover {{
+        opacity: 0.85;
+      }}
+      /* Buttons — secondary (outline) — used for starter questions too */
+      .stButton > button[kind="secondary"] {{
+        background: var(--c-surface) !important;
+        color: var(--c-ink) !important;
+        border: 1px solid var(--c-border) !important;
+        border-left: 3px solid var(--c-accent) !important;
+        border-radius: var(--r-sm) !important;
+        font-family: var(--f-display) !important;
+        font-size: {Size.md}px !important;
+        font-weight: 400 !important;
+        text-align: left !important;
+        padding: 12px 16px !important;
+        white-space: normal !important;
+        line-height: 1.4 !important;
+        height: auto !important;
+        box-shadow: none !important;
+        transition: background 0.1s !important;
+      }}
+      .stButton > button[kind="secondary"]:hover {{
+        background: var(--c-surface-2) !important;
       }}
 
       /* File uploader */
@@ -177,7 +189,7 @@ def inject_global_styles() -> None:
         border-color: var(--c-ink) !important;
       }}
 
-      /* Dataframe styling */
+      /* Dataframe */
       [data-testid="stDataFrame"] {{
         border: 1px solid var(--c-border) !important;
         border-radius: var(--r-sm) !important;
@@ -191,40 +203,20 @@ def inject_global_styles() -> None:
         font-size: {Size.sm}px !important;
       }}
 
-      /* Code blocks */
-      .stCodeBlock pre {{
-        background: var(--c-surface-dark) !important;
-        font-family: var(--f-mono) !important;
-        border-radius: var(--r-sm) !important;
-        font-size: 13px !important;
-      }}
-
       /* Expander */
       [data-testid="stExpander"] {{
         border: 1px solid var(--c-border) !important;
         border-radius: var(--r-sm) !important;
         background: var(--c-surface) !important;
         box-shadow: none !important;
+        margin-bottom: {Space.x3} !important;
       }}
       [data-testid="stExpander"] summary {{
         font-family: var(--f-body) !important;
         font-size: {Size.sm}px !important;
-        color: var(--c-ink) !important;
-      }}
-
-      /* Tabs */
-      [data-baseweb="tab-list"] {{
-        border-bottom: 1px solid var(--c-border) !important;
-        gap: {Space.x6};
-      }}
-      [data-baseweb="tab"] {{
-        font-family: var(--f-body) !important;
-        font-size: {Size.sm}px !important;
         font-weight: 500 !important;
-        color: var(--c-ink-3) !important;
-      }}
-      [data-baseweb="tab"][aria-selected="true"] {{
         color: var(--c-ink) !important;
+        padding: 12px 14px !important;
       }}
 
       /* Spinner */
@@ -232,10 +224,11 @@ def inject_global_styles() -> None:
         border-top-color: var(--c-accent) !important;
       }}
 
-      /* ── Custom component classes ─────────────────────────────────── */
+      /* Hide running-indicator (we use our own spinners) */
+      [data-testid="stStatusWidget"] {{ display: none; }}
 
-      /* Page header */
-      .ap-header {{
+      /* ── App header ──────────────────────────────────────────────── */
+      .qf-header {{
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -243,22 +236,22 @@ def inject_global_styles() -> None:
         margin-bottom: {Space.x6};
         border-bottom: 1px solid var(--c-border);
       }}
-      .ap-brand {{
+      .qf-brand {{
         display: flex; align-items: baseline; gap: {Space.x3};
       }}
-      .ap-brand-mark {{
+      .qf-brand-mark {{
         font-family: var(--f-display);
         font-size: {Size.xl2}px;
         color: var(--c-accent);
         line-height: 1;
       }}
-      .ap-brand-name {{
+      .qf-brand-name {{
         font-family: var(--f-display);
         font-size: {Size.xl}px;
         color: var(--c-ink);
         letter-spacing: -0.01em;
       }}
-      .ap-brand-tag {{
+      .qf-brand-tag {{
         font-family: var(--f-body);
         font-size: {Size.xs}px;
         color: var(--c-ink-muted);
@@ -266,7 +259,7 @@ def inject_global_styles() -> None:
         letter-spacing: 0.08em;
         margin-left: {Space.x2};
       }}
-      .ap-model-badge {{
+      .qf-model-badge {{
         display: inline-flex; align-items: center; gap: {Space.x2};
         padding: 5px 10px;
         background: var(--c-surface);
@@ -276,179 +269,259 @@ def inject_global_styles() -> None:
         font-size: {Size.xs}px;
         color: var(--c-ink-2);
       }}
-      .ap-model-badge .dot {{
-        width: 6px; height: 6px; border-radius: 50%;
-        background: var(--c-success);
+      .qf-model-badge .dot {{
+        width: 6px; height: 6px; border-radius: 50%; background: var(--c-success);
       }}
-      .ap-model-badge .dot.warn {{ background: var(--c-warning); }}
-      .ap-model-badge .provider {{ color: var(--c-ink-muted); }}
-      .ap-model-badge .sep {{ color: var(--c-ink-muted); margin: 0 2px; }}
+      .qf-model-badge .dot.warn {{ background: var(--c-warning); }}
+      .qf-model-badge .provider {{ color: var(--c-ink-muted); }}
+      .qf-model-badge .sep {{ color: var(--c-ink-muted); margin: 0 2px; }}
 
-      /* Section heading */
-      .ap-section-label {{
+      /* ── Section heading ──────────────────────────────────────────── */
+      .qf-section-label {{
         font-family: var(--f-body);
         font-size: {Size.xs}px;
         text-transform: uppercase;
         letter-spacing: 0.1em;
         color: var(--c-ink-muted);
         margin: {Space.x6} 0 {Space.x3} 0;
-        display: flex;
-        align-items: center;
-        gap: {Space.x2};
+        font-weight: 500;
       }}
 
-      /* Card */
-      .ap-card {{
+      /* ── Sidebar styling ──────────────────────────────────────────── */
+      .sb-brand {{
+        display: flex; align-items: baseline; gap: {Space.x2};
+        padding: 0 0 {Space.x4} 0;
+      }}
+      .sb-mark {{
+        font-family: var(--f-display);
+        font-size: {Size.xl2}px;
+        color: var(--c-accent);
+        line-height: 1;
+      }}
+      .sb-name {{
+        font-family: var(--f-display);
+        font-size: {Size.lg}px;
+        color: var(--c-ink);
+      }}
+      .sb-section-label {{
+        font-family: var(--f-body);
+        font-size: {Size.xs}px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--c-ink-muted);
+        margin: {Space.x6} 0 {Space.x2} 0;
+        font-weight: 500;
+      }}
+      .sb-provider-pill {{
+        display: flex; align-items: center; gap: 8px;
+        padding: 10px 12px;
+        background: var(--c-surface-2);
+        border: 1px solid var(--c-border);
+        border-radius: var(--r-sm);
+        margin-bottom: {Space.x3};
+      }}
+      .sb-provider-dot {{
+        width: 7px; height: 7px; border-radius: 50%;
+        background: var(--c-success);
+        flex-shrink: 0;
+      }}
+      .sb-provider-name {{
+        font-family: var(--f-body);
+        font-size: {Size.sm}px;
+        font-weight: 500;
+        color: var(--c-ink);
+        flex: 1;
+      }}
+      .sb-provider-tag {{
+        font-family: var(--f-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--c-success);
+      }}
+      .sb-empty {{
+        padding: 12px;
+        background: var(--c-surface-2);
+        border: 1px dashed var(--c-border-dashed);
+        border-radius: var(--r-sm);
+        font-size: {Size.sm}px;
+        color: var(--c-ink-3);
+        line-height: 1.5;
+      }}
+      .sb-empty code {{
+        font-family: var(--f-mono);
+        font-size: 11px;
+        background: var(--c-bg);
+        padding: 1px 4px;
+        border-radius: 2px;
+      }}
+
+      /* ── Right-rail dataset panel ─────────────────────────────────── */
+      .qf-rail-hero {{
+        padding: 0 0 {Space.x4} 0;
+        border-bottom: 1px solid var(--c-border);
+        margin-bottom: {Space.x4};
+      }}
+      .qf-rail-name {{
+        font-family: var(--f-display);
+        font-size: {Size.xl}px;
+        color: var(--c-ink);
+        line-height: 1.25;
+        margin-bottom: {Space.x2};
+        letter-spacing: -0.01em;
+      }}
+      .qf-rail-desc {{
+        font-family: var(--f-display);
+        font-style: italic;
+        font-size: {Size.sm}px;
+        color: var(--c-ink-3);
+        line-height: 1.55;
+      }}
+      .qf-rail-stats {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: {Space.x3};
+        margin-bottom: {Space.x4};
+      }}
+      .qf-stat {{
         background: var(--c-surface);
         border: 1px solid var(--c-border);
         border-radius: var(--r-sm);
-        padding: {Space.x5} {Space.x6};
+        padding: 10px 12px;
       }}
-      .ap-card.accent-left {{
-        border-left: 3px solid var(--c-accent);
-      }}
-
-      /* Hero (dataset summary on load) */
-      .ap-hero {{
-        background: var(--c-surface);
-        border: 1px solid var(--c-border);
-        padding: {Space.x6};
-        margin-bottom: {Space.x4};
-      }}
-      .ap-hero h2 {{
-        font-family: var(--f-display);
-        font-size: {Size.xl2}px;
-        margin: 0 0 {Space.x2} 0;
-      }}
-      .ap-hero .desc {{
-        font-family: var(--f-display);
-        font-style: italic;
-        font-size: {Size.md}px;
-        color: var(--c-ink-3);
-        margin: 0 0 {Space.x4} 0;
-        line-height: 1.5;
-      }}
-      .ap-stat-row {{
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: {Space.x6};
-        border-top: 1px solid var(--c-border);
-        padding-top: {Space.x4};
-      }}
-      .ap-stat .label {{
-        font-size: {Size.xs}px;
+      .qf-stat .lbl {{
+        font-size: 10px;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--c-ink-muted);
         margin-bottom: 2px;
+        font-weight: 500;
       }}
-      .ap-stat .value {{
+      .qf-stat .val {{
         font-family: var(--f-mono);
-        font-size: {Size.lg}px;
+        font-size: {Size.md}px;
         color: var(--c-ink);
         font-weight: 500;
       }}
-
-      /* Suggested question pill */
-      .ap-question-pill {{
+      .qf-rail-note {{
+        font-family: var(--f-mono);
+        font-size: 11px;
+        color: var(--c-ink-muted);
+        line-height: 1.5;
+        padding: 8px 10px;
         background: var(--c-surface);
         border: 1px solid var(--c-border);
-        border-left: 3px solid var(--c-accent);
-        padding: {Space.x3} {Space.x4};
-        font-family: var(--f-display);
-        font-size: {Size.md}px;
+        border-left: 3px solid var(--c-warning);
+        border-radius: var(--r-sm);
+        margin-bottom: {Space.x3};
+      }}
+
+      /* Dictionary entries */
+      .qf-dict-entry {{
+        padding: {Space.x2} 0;
+        border-bottom: 1px solid var(--c-border);
+      }}
+      .qf-dict-entry:last-child {{ border-bottom: 0; }}
+      .qf-dict-col {{
+        font-family: var(--f-mono);
+        font-size: {Size.xs}px;
+        font-weight: 600;
         color: var(--c-ink);
-        cursor: pointer;
-        transition: background 0.1s;
+        margin-bottom: 2px;
+        text-transform: lowercase;
       }}
-      .ap-question-pill:hover {{
-        background: var(--c-surface-2);
+      .qf-dict-desc {{
+        font-family: var(--f-body);
+        font-size: {Size.xs}px;
+        color: var(--c-ink-3);
+        line-height: 1.55;
       }}
 
-      /* Analysis card */
-      .ap-analysis {{
-        background: var(--c-surface);
-        border: 1px solid var(--c-border);
-        border-left: 3px solid var(--c-accent);
-        padding: {Space.x5} {Space.x6};
-      }}
-      .ap-analysis .headline {{
+      /* ── Query flow ───────────────────────────────────────────────── */
+      .qf-question {{
         font-family: var(--f-display);
         font-size: {Size.xl}px;
         color: var(--c-ink);
         line-height: 1.3;
-        margin: {Space.x2} 0 {Space.x4} 0;
+        margin: {Space.x4} 0 {Space.x3} 0;
+        letter-spacing: -0.01em;
       }}
-      .ap-analysis .finding {{
-        display: flex;
-        gap: {Space.x3};
-        margin-bottom: {Space.x3};
+      .qf-sql-label {{
+        font-family: var(--f-mono);
+        font-size: {Size.xs}px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--c-ink-muted);
+        margin: {Space.x2} 0 {Space.x2} 0;
+        font-weight: 500;
+      }}
+      .qf-sql-reasoning {{
+        padding: 10px 12px;
+        background: var(--c-surface-2);
+        border-left: 3px solid var(--c-accent);
+        font-family: var(--f-display);
+        font-style: italic;
+        font-size: {Size.sm}px;
+        color: var(--c-ink-3);
+        line-height: 1.5;
+        margin: {Space.x2} 0 {Space.x3} 0;
+        border-radius: var(--r-sm);
+      }}
+      .qf-sql-reasoning .tag {{
+        font-family: var(--f-body);
+        font-style: normal;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--c-accent);
+        margin-right: 6px;
+        font-weight: 500;
+      }}
+
+      .qf-analysis {{
+        background: var(--c-surface);
+        border: 1px solid var(--c-border);
+        border-left: 3px solid var(--c-accent);
+        padding: {Space.x4} {Space.x5};
+        border-radius: var(--r-sm);
+        margin-top: {Space.x2};
+      }}
+      .qf-analysis-headline {{
+        font-family: var(--f-display);
+        font-size: {Size.lg}px;
+        color: var(--c-ink);
+        line-height: 1.3;
+        margin: 0 0 {Space.x3} 0;
+      }}
+      .qf-analysis .finding {{
+        display: flex; gap: {Space.x3};
+        margin-bottom: {Space.x2};
         font-size: {Size.base}px;
         line-height: 1.55;
         color: var(--c-ink-2);
       }}
-      .ap-analysis .finding .num {{
+      .qf-analysis .finding .num {{
         font-family: var(--f-mono);
-        font-size: {Size.xs}px;
+        font-size: 10px;
         color: var(--c-accent);
         font-weight: 600;
         margin-top: 4px;
         flex-shrink: 0;
       }}
-      .ap-analysis .caveats {{
-        margin-top: {Space.x4};
-        padding-top: {Space.x3};
+      .qf-analysis .caveats {{
+        margin-top: {Space.x3};
+        padding-top: {Space.x2};
         border-top: 1px dashed var(--c-border-dashed);
         font-family: var(--f-body);
         font-size: {Size.sm}px;
         color: var(--c-ink-muted);
         font-style: italic;
       }}
-      .ap-analysis .caveats strong {{
+      .qf-analysis .caveats strong {{
         color: var(--c-warning);
         font-style: normal;
         font-weight: 500;
-        margin-right: 6px;
-      }}
-
-      /* SQL editor surround */
-      .ap-sql-frame {{
-        background: var(--c-surface-dark);
-        color: var(--c-ink-on-dark);
-        border-radius: var(--r-sm);
-        overflow: hidden;
-      }}
-      .ap-sql-header {{
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 10px 14px;
-        background: #1a1614;
-        border-bottom: 1px solid #2a2522;
-      }}
-      .ap-sql-label {{
-        font-family: var(--f-mono);
-        font-size: {Size.xs}px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #a8a29e;
-      }}
-      .ap-sql-reasoning {{
-        padding: 10px 14px;
-        background: #15110f;
-        border-top: 1px solid #2a2522;
-        font-family: var(--f-display);
-        font-style: italic;
-        font-size: {Size.sm}px;
-        color: #a8a29e;
-        line-height: 1.5;
-      }}
-      .ap-sql-reasoning .tag {{
-        font-family: var(--f-body);
-        font-style: normal;
-        font-size: {Size.xs}px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--c-accent-soft);
-        margin-right: 8px;
+        margin-right: 4px;
       }}
 
       /* ── Auth screen ──────────────────────────────────────────────── */
@@ -465,7 +538,6 @@ def inject_global_styles() -> None:
         font-family: var(--f-display);
         font-size: {Size.xl2}px;
         color: var(--c-accent);
-        line-height: 1;
       }}
       .auth-name {{
         font-family: var(--f-display);
@@ -482,8 +554,8 @@ def inject_global_styles() -> None:
       }}
 
       /* Footer */
-      .ap-footer {{
-        margin-top: {Space.x16};
+      .qf-footer {{
+        margin-top: {Space.x12};
         padding-top: {Space.x4};
         border-top: 1px solid var(--c-border);
         font-family: var(--f-mono);

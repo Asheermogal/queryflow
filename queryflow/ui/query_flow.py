@@ -1,18 +1,15 @@
 """
 The conversational query flow:
 
-  question input
-    → generated SQL (editable)
-    → run → results table
-    → AI analysis + chart
-    → follow-up
+  question (typed or clicked from starter) → SQL auto-generated and auto-run
+    → results table → AI analysis card → chart
+    → user can edit SQL and Run Query again to re-execute
+    → user can ask a follow-up at any time
 
 All state lives in st.session_state.current_query and st.session_state.history.
 """
 from __future__ import annotations
 
-import json
-import time
 from typing import Any
 
 import pandas as pd
@@ -39,21 +36,19 @@ def _ensure_session_keys() -> None:
     st.session_state.setdefault("suggested_questions", None)
 
 
-def _kickoff_question(text: str) -> None:
-    st.session_state.pending_question = text
-
-
+# ── Starter questions ────────────────────────────────────────────────────
 def render_starter_questions(
     client: LLMClient,
     dataset: Dataset,
     stats: list[ColumnStats],
 ) -> None:
+    """Render suggested questions as clickable cards. Clicking auto-runs the flow."""
     _ensure_session_keys()
 
     if st.session_state.suggested_questions is None:
         schema_text = schema_to_prompt_text(dataset.table, dataset.description, stats)
         try:
-            with st.spinner("Generating starter questions…"):
+            with st.spinner("Preparing suggested questions…"):
                 res = client.complete_json(
                     SAMPLE_QUESTIONS_SYS,
                     sample_questions_user(
@@ -61,7 +56,14 @@ def render_starter_questions(
                     ),
                     max_tokens=600,
                 )
-                st.session_state.suggested_questions = res.get("questions", [])
+                # Dedupe while preserving order
+                seen: set[str] = set()
+                qs: list[str] = []
+                for q in res.get("questions", []):
+                    if q and q not in seen:
+                        seen.add(q)
+                        qs.append(q)
+                st.session_state.suggested_questions = qs[:5]
         except Exception as e:
             st.session_state.suggested_questions = []
             st.warning(f"Couldn't generate starter questions: {e}")
@@ -70,55 +72,49 @@ def render_starter_questions(
     if not questions:
         return
 
-    section_label("Suggested starter questions")
-
-    # Render as a stack of pill-styled buttons
+    section_label("Suggested questions")
+    # Use the dataset-aware key so questions don't conflict when switching datasets
     for i, q in enumerate(questions):
-        st.markdown(
-            f"""
-            <div class="ap-question-pill" onclick="window.parent.document.querySelector('[data-testid=stTextInput] input').value='{q.replace("'", "\\'")}';">
-              {q}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        # Hidden button to make the pill actually trigger the question
-        col = st.columns([0.0001, 1])[1]
-        if col.button(q, key=f"q_starter_{i}", use_container_width=True, type="secondary"):
-            _kickoff_question(q)
+        key = f"starter_{dataset.table}_{i}"
+        if st.button(q, key=key, use_container_width=True, type="secondary"):
+            st.session_state.pending_run_question = q
             st.rerun()
 
 
+# ── Input bar ────────────────────────────────────────────────────────────
 def render_input(client_ready: bool) -> None:
-    """The big question input bar."""
-    pending = st.session_state.pop("pending_question", "")
-    cols = st.columns([1, 0.18])
+    """The Ask anything input + send button."""
+    cols = st.columns([1, 0.15])
     with cols[0]:
         question = st.text_input(
-            "Ask the data",
-            value=pending,
+            "Ask anything about the data",
             placeholder=(
                 "Ask anything about the data…"
                 if client_ready
-                else "Configure your API key in the sidebar to begin."
+                else "Configure your API key in secrets to begin."
             ),
             disabled=not client_ready,
             label_visibility="collapsed",
             key="question_input",
         )
     with cols[1]:
-        go = st.button("Ask", use_container_width=True, disabled=not client_ready)
+        send = st.button("Ask", use_container_width=True, disabled=not client_ready, type="primary")
 
-    if go and question.strip():
+    if send and question.strip():
         st.session_state.pending_run_question = question.strip()
+        st.rerun()
 
 
-def generate_sql_for_pending(
+# ── Auto-execute pending question ────────────────────────────────────────
+def process_pending_question(
     client: LLMClient,
     dataset: Dataset,
     stats: list[ColumnStats],
+    db: Database,
 ) -> None:
-    """If a question was just submitted, generate SQL and store as current_query."""
+    """If a question is pending (from starter click or input), run the full pipeline:
+       generate SQL → execute → store results → trigger analysis.
+    """
     q = st.session_state.pop("pending_run_question", None)
     if not q:
         return
@@ -128,6 +124,8 @@ def generate_sql_for_pending(
         {"question": h["question"], "sql": h["sql"]}
         for h in st.session_state.history
     ]
+
+    # 1. Generate SQL
     try:
         with st.spinner("Translating to SQL…"):
             res = client.complete_json(
@@ -142,14 +140,8 @@ def generate_sql_for_pending(
                 ),
                 max_tokens=800,
             )
-        st.session_state.current_query = {
-            "question": q,
-            "sql": res.get("sql", "").strip(),
-            "reasoning": res.get("reasoning", ""),
-            "results": None,
-            "analysis": None,
-            "error": None,
-        }
+        sql = res.get("sql", "").strip()
+        reasoning = res.get("reasoning", "")
     except Exception as e:
         st.session_state.current_query = {
             "question": q,
@@ -159,88 +151,117 @@ def generate_sql_for_pending(
             "analysis": None,
             "error": f"Couldn't generate SQL: {e}",
         }
+        return
+
+    state = {
+        "question": q,
+        "sql": sql,
+        "reasoning": reasoning,
+        "results": None,
+        "analysis": None,
+        "error": None,
+    }
+
+    # 2. Auto-execute the SQL
+    if sql:
+        try:
+            with st.spinner("Running query…"):
+                columns, rows = db.query(sql)
+                state["results"] = {"columns": columns, "rows": rows}
+        except Exception as e:
+            state["error"] = f"SQL error: {e}"
+
+    # 3. Auto-generate analysis if we have rows
+    if state["results"] and state["results"]["rows"]:
+        try:
+            with st.spinner("Reading the results…"):
+                analysis = client.complete_json(
+                    ANALYSIS_SYS,
+                    analysis_user(
+                        state["question"],
+                        state["sql"],
+                        state["results"]["columns"],
+                        state["results"]["rows"],
+                    ),
+                    max_tokens=1200,
+                )
+            state["analysis"] = analysis
+        except Exception as e:
+            state["analysis"] = None
+            state["analysis_error"] = str(e)
+
+    st.session_state.current_query = state
 
 
+# ── Render current query ─────────────────────────────────────────────────
 def render_current_query(db: Database, client: LLMClient) -> None:
-    """Show whatever is in st.session_state.current_query — SQL editor, results, analysis."""
     state = st.session_state.current_query
     if not state:
         return
 
+    # Question header
     st.markdown(
-        f'<div style="margin: {20}px 0 {12}px 0; '
-        'font-family: var(--f-display); font-size: 22px; color: var(--c-ink);">'
-        f"{state['question']}"
-        "</div>",
+        f'<div class="qf-question">{state["question"]}</div>',
         unsafe_allow_html=True,
     )
 
-    if state.get("error") and not state.get("sql"):
-        error_block(state["error"])
-        return
-
-    # SQL editor (dark frame)
-    st.markdown('<div class="ap-sql-frame">', unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class="ap-sql-header">
-          <span class="ap-sql-label">▸ SQL · editable</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div class="sql-editor">', unsafe_allow_html=True)
-    sql = st.text_area(
-        "SQL",
-        value=state["sql"],
-        height=130,
-        label_visibility="collapsed",
-        key=f"sql_edit_{id(state)}",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if state.get("reasoning"):
-        st.markdown(
-            f"""
-            <div class="ap-sql-reasoning">
-              <span class="tag">Approach</span>{state['reasoning']}
-            </div>
-            """,
-            unsafe_allow_html=True,
+    # SQL editor (always shown if we have an SQL string)
+    if state.get("sql") or state.get("error"):
+        st.markdown('<div class="qf-sql-label">Generated SQL · editable</div>', unsafe_allow_html=True)
+        sql_edit_key = f"sql_edit_{hash(state['question'])}"
+        new_sql = st.text_area(
+            "SQL",
+            value=state.get("sql", ""),
+            height=130,
+            label_visibility="collapsed",
+            key=sql_edit_key,
         )
-    st.markdown("</div>", unsafe_allow_html=True)
+        state["sql"] = new_sql
 
-    # Update SQL in state if user edited
-    state["sql"] = sql
+        if state.get("reasoning"):
+            st.markdown(
+                f'<div class="qf-sql-reasoning">'
+                f'<span class="tag">Approach</span>'
+                f'{state["reasoning"]}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-    # Action row
-    cols = st.columns([0.18, 0.18, 1])
-    run = cols[0].button("Run query", use_container_width=True)
-    new_q = cols[1].button("New question", use_container_width=True, type="secondary")
+        # Run / Reset buttons
+        b1, b2, _ = st.columns([0.2, 0.25, 1])
+        run = b1.button("Run query", use_container_width=True, key=f"btn_run_{sql_edit_key}", type="primary")
+        new_q = b2.button("Ask another", use_container_width=True, key=f"btn_new_{sql_edit_key}", type="secondary")
 
-    if new_q:
-        # Roll current into history if completed
-        if state.get("analysis"):
-            st.session_state.history.append({
-                "question": state["question"],
-                "sql": state["sql"],
-                "summary": state["analysis"].get("summary", ""),
-            })
-        st.session_state.current_query = None
-        st.rerun()
+        if new_q:
+            if state.get("analysis"):
+                st.session_state.history.append({
+                    "question": state["question"],
+                    "sql": state["sql"],
+                    "summary": state["analysis"].get("summary", ""),
+                })
+            st.session_state.current_query = None
+            st.rerun()
 
-    if run:
-        try:
-            with st.spinner("Running query…"):
-                columns, rows = db.query(state["sql"])
-                state["results"] = {"columns": columns, "rows": rows}
-                state["analysis"] = None
-                state["error"] = None
-        except Exception as e:
-            state["error"] = f"SQL error: {e}"
-            state["results"] = None
+        if run:
+            try:
+                with st.spinner("Running query…"):
+                    columns, rows = db.query(state["sql"])
+                    state["results"] = {"columns": columns, "rows": rows}
+                    state["analysis"] = None   # force re-analysis
+                    state["error"] = None
+                # Re-run analysis
+                if rows:
+                    with st.spinner("Reading the results…"):
+                        analysis = client.complete_json(
+                            ANALYSIS_SYS,
+                            analysis_user(state["question"], state["sql"], columns, rows),
+                            max_tokens=1200,
+                        )
+                    state["analysis"] = analysis
+                st.rerun()
+            except Exception as e:
+                state["error"] = f"SQL error: {e}"
 
-    # Error
     if state.get("error"):
         error_block(state["error"])
 
@@ -248,36 +269,14 @@ def render_current_query(db: Database, client: LLMClient) -> None:
     results = state.get("results")
     if results is not None:
         cols_, rows_ = results["columns"], results["rows"]
-        section_label(
-            f"Results · {len(rows_)} row{'s' if len(rows_) != 1 else ''}"
-        )
+        section_label(f"Results · {len(rows_)} row{'s' if len(rows_) != 1 else ''}")
         if rows_:
             df = pd.DataFrame(rows_, columns=cols_)
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
-            st.markdown(
-                '<div class="ap-card" style="font-family: var(--f-display); '
-                'font-style: italic; color: var(--c-ink-muted); text-align: center;">'
-                "No rows returned."
-                "</div>",
-                unsafe_allow_html=True,
-            )
+            st.info("No rows returned for this query.")
 
-        # Analysis (auto-triggered after results)
-        if rows_ and not state.get("analysis"):
-            try:
-                with st.spinner("Reading the results…"):
-                    analysis = client.complete_json(
-                        ANALYSIS_SYS,
-                        analysis_user(state["question"], state["sql"], cols_, rows_),
-                        max_tokens=1200,
-                    )
-                state["analysis"] = analysis
-            except Exception as e:
-                state["analysis"] = None
-                st.warning(f"Analysis failed: {e}")
-
-    # Analysis card + chart
+    # Analysis card
     analysis = state.get("analysis")
     if analysis:
         section_label("Analysis")
@@ -294,36 +293,19 @@ def render_current_query(db: Database, client: LLMClient) -> None:
         if analysis.get("caveats"):
             caveats_text = " ".join(analysis["caveats"])
             caveats_html = (
-                f'<div class="caveats"><strong>Caveats —</strong>{caveats_text}</div>'
+                f'<div class="caveats"><strong>Caveats —</strong> {caveats_text}</div>'
             )
 
         st.markdown(
-            f"""
-            <div class="ap-analysis">
-              <div class="headline">{analysis.get('summary', '')}</div>
-              {findings_html}
-              {caveats_html}
-            </div>
-            """,
+            f'<div class="qf-analysis">'
+            f'<div class="qf-analysis-headline">{analysis.get("summary", "")}</div>'
+            f'{findings_html}'
+            f'{caveats_html}'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
         spec = analysis.get("chart_spec")
         if spec and state.get("results"):
-            cols_, rows_ = state["results"]["columns"], state["results"]["rows"]
-            df = pd.DataFrame(rows_, columns=cols_)
+            df = pd.DataFrame(state["results"]["rows"], columns=state["results"]["columns"])
             render_chart(spec, df)
-
-
-def render_history_footer() -> None:
-    h = st.session_state.get("history", [])
-    if not h:
-        return
-    st.markdown(
-        f'<div style="margin-top: 32px; padding-top: 16px; '
-        f'border-top: 1px dashed var(--c-border-dashed); '
-        f'font-family: var(--f-mono); font-size: 11px; color: var(--c-ink-muted);">'
-        f"{len(h)} prior turn{'s' if len(h) != 1 else ''} in this thread — the model uses them as context for follow-ups."
-        f"</div>",
-        unsafe_allow_html=True,
-    )

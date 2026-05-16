@@ -84,6 +84,6 @@ class Radius:
 
 
 # ── App identity ─────────────────────────────────────────────────────────
-APP_NAME = "Ask the Data"
+APP_NAME = "QueryFlow AI"
 APP_TAGLINE = "Conversational analytics for any dataset"
-APP_VERSION = "0.1"
+APP_VERSION = "0.2"
