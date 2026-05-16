@@ -43,6 +43,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 inject_global_styles()
+inject_sidebar_toggle()
 
 # ── Auth gate ────────────────────────────────────────────────────────────
 require_password()
