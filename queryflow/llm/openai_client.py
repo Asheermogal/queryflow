@@ -1,11 +1,16 @@
 """OpenAI / GPT provider.
 
-Key fixes:
-- o1/o3/o4 reasoning models require `max_completion_tokens` not `max_tokens`
-- o1/o3/o4 do not support the `temperature` parameter
-- Model display names cleaned up (strips date suffixes)
+Key behaviors:
+- Detects o-series reasoning models (o1, o3, o4) and uses max_completion_tokens
+  instead of max_tokens, drops temperature, and applies a 6x token multiplier
+  to leave room for the model's internal reasoning tokens.
+- Sorts the live model list so standard chat models (gpt-4o, gpt-4o-mini)
+  come BEFORE reasoning models, so the default selection is a fast/cheap
+  chat model rather than a slow reasoning model.
 """
 from __future__ import annotations
+
+import re
 
 from openai import OpenAI
 
@@ -13,13 +18,13 @@ from llm.base import LLMClient, ModelInfo
 
 
 _FALLBACK_MODELS = [
-    ModelInfo(id="gpt-4o", display="GPT-4o", context=128_000),
     ModelInfo(id="gpt-4o-mini", display="GPT-4o mini", context=128_000),
+    ModelInfo(id="gpt-4o", display="GPT-4o", context=128_000),
     ModelInfo(id="o4-mini", display="o4-mini", context=128_000),
 ]
 
-# Models that use max_completion_tokens and don't support temperature
 _REASONING_PREFIXES = ("o1", "o3", "o4")
+_REASONING_TOKEN_MULTIPLIER = 6
 
 
 def _is_reasoning_model(model_id: str) -> bool:
@@ -27,7 +32,6 @@ def _is_reasoning_model(model_id: str) -> bool:
 
 
 def _humanize(model_id: str) -> str:
-    import re
     cleaned = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", model_id)
     if re.match(r"^o\d", cleaned):
         return cleaned
@@ -41,6 +45,22 @@ def _humanize(model_id: str) -> str:
         else:
             out = out + " " + p.capitalize()
     return out.strip()
+
+
+def _model_priority(model_id: str) -> tuple[int, str]:
+    if _is_reasoning_model(model_id):
+        return (5, model_id)
+    if model_id.startswith("gpt-4o-mini"):
+        return (0, model_id)
+    if model_id.startswith("gpt-4o"):
+        return (1, model_id)
+    if model_id.startswith("gpt-4"):
+        return (2, model_id)
+    if model_id.startswith("gpt-"):
+        return (3, model_id)
+    if model_id.startswith("chatgpt-"):
+        return (4, model_id)
+    return (6, model_id)
 
 
 class OpenAIClient(LLMClient):
@@ -63,7 +83,7 @@ class OpenAIClient(LLMClient):
                 if any(skip in mid for skip in (
                     "audio", "realtime", "transcribe", "tts",
                     "embedding", "image", "moderation", "search", "instruct",
-                    "dalle", "whisper",
+                    "dalle", "whisper", "preview",
                 )):
                     continue
                 chat_models.append(
@@ -71,23 +91,27 @@ class OpenAIClient(LLMClient):
                 )
             if not chat_models:
                 return _FALLBACK_MODELS
+
             chat_models.sort(key=lambda m: m.id, reverse=True)
             seen_display: dict[str, ModelInfo] = {}
             for m in chat_models:
                 if m.display not in seen_display:
                     seen_display[m.display] = m
-            deduped = sorted(seen_display.values(), key=lambda m: m.id, reverse=True)
+            deduped = list(seen_display.values())
+            deduped.sort(key=lambda m: _model_priority(m.id))
             return deduped
         except Exception:
             return _FALLBACK_MODELS
 
     def complete(self, system: str, user: str, max_tokens: int = 1500) -> str:
         client = OpenAI(api_key=self.config.api_key)
+
         if _is_reasoning_model(self.config.model_id):
+            budget = max(max_tokens * _REASONING_TOKEN_MULTIPLIER, 4000)
             resp = client.chat.completions.create(
                 model=self.config.model_id,
                 messages=[{"role": "user", "content": f"{system}\n\n{user}"}],
-                max_completion_tokens=max_tokens,
+                max_completion_tokens=budget,
             )
         else:
             resp = client.chat.completions.create(
