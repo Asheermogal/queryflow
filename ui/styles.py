@@ -77,24 +77,31 @@ def inject_global_styles() -> None:
       section[data-testid="stSidebar"] .block-container {{
         padding-top: {Space.x4};
       }}
-      /* Make the sidebar collapse/expand toggle highly visible and persistent */
+      /* Sidebar toggle — force always visible with multiple selector fallbacks */
       [data-testid="stSidebarCollapsedControl"],
-      [data-testid="collapsedControl"] {{
-        display: block !important;
+      [data-testid="collapsedControl"],
+      [aria-label="Open sidebar"],
+      [aria-label="Close sidebar"] {{
+        display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
-        position: fixed !important;
-        top: 12px !important;
-        left: 12px !important;
-        z-index: 9999 !important;
       }}
-      [data-testid="stSidebarCollapsedControl"] button,
-      [data-testid="collapsedControl"] button {{
+      [data-testid="stSidebarCollapsedControl"] {{
+        position: fixed !important;
+        top: 16px !important;
+        left: 16px !important;
+        z-index: 99999 !important;
         background: var(--c-surface) !important;
         border: 1px solid var(--c-border) !important;
         border-radius: var(--r-sm) !important;
-        padding: 8px 10px !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.06) !important;
+        padding: 6px 8px !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+      }}
+      [data-testid="stSidebarCollapsedControl"] button,
+      [data-testid="collapsedControl"] button {{
+        background: transparent !important;
+        border: none !important;
+        cursor: pointer !important;
       }}
 
       /* ── Typography ────────────────────────────────────────────────── */
