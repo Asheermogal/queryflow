@@ -1,12 +1,16 @@
 """
-The conversational query flow:
+Chat flow.
 
-  question (typed or clicked from starter) → SQL auto-generated and auto-run
-    → results table → AI analysis card → chart
-    → user can edit SQL and Run Query again to re-execute
-    → user can ask a follow-up at any time
+Single chat with two modes (segmented toggle above the input):
 
-All state lives in st.session_state.current_query and st.session_state.history.
+  * Explore  → text-only answer + supporting bullets, no SQL ever executed
+  * Query    → LLM drafts SQL only; user must press Run to execute. After Run
+               the result table, analysis card, auto chart, and a custom-chart
+               builder are shown.
+
+Suggested questions come from the cached dataset brief (one LLM call per
+dataset). Clicking a suggestion sets `pending_run_question` and reuses the
+same draft path.
 """
 from __future__ import annotations
 
@@ -15,12 +19,19 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from core.config import (
+    BRIEF_SUGGESTED_QUESTIONS,
+    TOKENS_ANALYSIS,
+    TOKENS_EXPLORE,
+    TOKENS_SQL_GEN,
+)
+from core.dataset_brief import brief_as_text, get_cached_brief, get_or_build_brief
 from core.prompts import (
     ANALYSIS_SYS,
-    SAMPLE_QUESTIONS_SYS,
+    EXPLORE_SYS,
     SQL_GEN_SYS,
     analysis_user,
-    sample_questions_user,
+    explore_user,
     sql_gen_user,
 )
 from ingest.database import Database, Dataset
@@ -28,106 +39,137 @@ from ingest.schema import ColumnStats, schema_to_prompt_text
 from llm.base import LLMClient
 from ui.chart import render_chart
 from ui.components import error_block, section_label
+from ui.custom_chart import custom_chart_builder
 
 
+# ── Session helpers ──────────────────────────────────────────────────────
 def _ensure_session_keys() -> None:
     st.session_state.setdefault("history", [])
     st.session_state.setdefault("current_query", None)
-    st.session_state.setdefault("suggested_questions", None)
 
 
-# ── Starter questions ────────────────────────────────────────────────────
-def render_starter_questions(
+# ── Suggested questions (from cached brief) ──────────────────────────────
+def render_suggested_questions(
     client: LLMClient,
     dataset: Dataset,
     stats: list[ColumnStats],
 ) -> None:
-    """Render suggested questions as clickable cards. Clicking auto-runs the flow."""
     _ensure_session_keys()
 
-    if st.session_state.suggested_questions is None:
-        schema_text = schema_to_prompt_text(dataset.table, dataset.description, stats)
-        try:
-            with st.spinner("Preparing suggested questions…"):
-                res = client.complete_json(
-                    SAMPLE_QUESTIONS_SYS,
-                    sample_questions_user(
-                        dataset.name, schema_text, dataset.dictionary_text
-                    ),
-                    max_tokens=600,
-                )
-                # Dedupe while preserving order
-                seen: set[str] = set()
-                qs: list[str] = []
-                for q in res.get("questions", []):
-                    if q and q not in seen:
-                        seen.add(q)
-                        qs.append(q)
-                st.session_state.suggested_questions = qs[:5]
-        except Exception as e:
-            st.session_state.suggested_questions = []
-            st.warning(f"Couldn't generate starter questions: {e}")
-
-    questions = st.session_state.suggested_questions or []
-    if not questions:
+    brief = get_or_build_brief(dataset, stats, client)
+    if not brief:
+        return
+    suggestions = (brief.get("suggested_questions") or [])[:BRIEF_SUGGESTED_QUESTIONS]
+    if not suggestions:
         return
 
     section_label("Suggested questions")
-    # Use the dataset-aware key so questions don't conflict when switching datasets
-    for i, q in enumerate(questions):
-        key = f"starter_{dataset.table}_{i}"
+    for i, q in enumerate(suggestions):
+        key = f"sugg_{dataset.table}_{i}"
         if st.button(q, key=key, use_container_width=True, type="secondary"):
-            st.session_state.pending_run_question = q
+            st.session_state.pending_run_question = {"q": q, "mode": "Query"}
             st.rerun()
 
 
-# ── Input bar ────────────────────────────────────────────────────────────
+# ── Input bar with mode toggle ───────────────────────────────────────────
 def render_input(client_ready: bool) -> None:
-    """The Ask anything input + send button."""
+    _ensure_session_keys()
+
+    # When `key` is set, Streamlit owns the value via session state — don't
+    # also pass `index=`. Initialize the session key once if missing.
+    if "ask_mode" not in st.session_state:
+        st.session_state["ask_mode"] = "Query"
+    mode = st.radio(
+        "Mode",
+        options=["Explore", "Query"],
+        horizontal=True,
+        key="ask_mode",
+        help=(
+            "Explore: plain-English insights, no SQL run.  "
+            "Query: SQL is drafted; you press Run to execute."
+        ),
+    )
+
     cols = st.columns([1, 0.15])
     with cols[0]:
+        placeholder = (
+            "Ask anything about the data…"
+            if client_ready
+            else "Configure your API key in secrets to begin."
+        )
         question = st.text_input(
-            "Ask anything about the data",
-            placeholder=(
-                "Ask anything about the data…"
-                if client_ready
-                else "Configure your API key in secrets to begin."
-            ),
+            "Ask anything",
+            placeholder=placeholder,
             disabled=not client_ready,
             label_visibility="collapsed",
             key="question_input",
         )
     with cols[1]:
-        send = st.button("Ask", use_container_width=True, disabled=not client_ready, type="primary")
+        send_label = "Explore" if mode == "Explore" else "Draft SQL"
+        send = st.button(
+            send_label,
+            use_container_width=True,
+            disabled=not client_ready,
+            type="primary",
+        )
 
     if send and question.strip():
-        st.session_state.pending_run_question = question.strip()
+        st.session_state.pending_run_question = {"q": question.strip(), "mode": mode}
         st.rerun()
 
 
-# ── Auto-execute pending question ────────────────────────────────────────
-def process_pending_question(
+# ── Draft generator (NO execution) ───────────────────────────────────────
+def generate_draft_for_pending(
     client: LLMClient,
     dataset: Dataset,
     stats: list[ColumnStats],
-    db: Database,
 ) -> None:
-    """If a question is pending (from starter click or input), run the full pipeline:
-       generate SQL → execute → store results → trigger analysis.
-    """
-    q = st.session_state.pop("pending_run_question", None)
-    if not q:
+    payload = st.session_state.pop("pending_run_question", None)
+    if not payload:
         return
+    if isinstance(payload, str):
+        payload = {"q": payload, "mode": "Query"}
+
+    q = payload["q"]
+    mode = payload.get("mode", "Query")
 
     schema_text = schema_to_prompt_text(dataset.table, dataset.description, stats)
+    brief_text = brief_as_text(get_cached_brief(dataset.table))
+
+    if mode == "Explore":
+        try:
+            with st.spinner("Thinking…"):
+                res = client.complete_json(
+                    EXPLORE_SYS,
+                    explore_user(q, dataset.name, schema_text, brief_text),
+                    max_tokens=TOKENS_EXPLORE,
+                )
+            st.session_state.current_query = {
+                "mode": "Explore",
+                "question": q,
+                "answer": res.get("answer", ""),
+                "bullets": res.get("bullets", []) or [],
+                "switch_to_query": bool(res.get("switch_to_query")),
+                "error": None,
+            }
+        except Exception as e:
+            st.session_state.current_query = {
+                "mode": "Explore",
+                "question": q,
+                "answer": "",
+                "bullets": [],
+                "switch_to_query": False,
+                "error": f"Couldn't explore: {e}",
+            }
+        return
+
+    # Query mode → DRAFT SQL ONLY. Do not execute.
     history_for_llm = [
         {"question": h["question"], "sql": h["sql"]}
         for h in st.session_state.history
     ]
-
-    # 1. Generate SQL
     try:
-        with st.spinner("Translating to SQL…"):
+        with st.spinner("Drafting SQL…"):
             res = client.complete_json(
                 SQL_GEN_SYS,
                 sql_gen_user(
@@ -138,44 +180,131 @@ def process_pending_question(
                     history_for_llm,
                     dataset.suppression_markers,
                 ),
-                max_tokens=800,
+                max_tokens=TOKENS_SQL_GEN,
             )
-        sql = res.get("sql", "").strip()
+        sql = (res.get("sql") or "").strip()
         reasoning = res.get("reasoning", "")
+        st.session_state.current_query = {
+            "mode": "Query",
+            "question": q,
+            "sql": sql,
+            "reasoning": reasoning,
+            "results": None,
+            "analysis": None,
+            "error": None,
+        }
     except Exception as e:
         st.session_state.current_query = {
+            "mode": "Query",
             "question": q,
             "sql": "",
             "reasoning": "",
             "results": None,
             "analysis": None,
-            "error": f"Couldn't generate SQL: {e}",
+            "error": f"Couldn't draft SQL: {e}",
         }
+
+
+# ── Render the current chat turn ─────────────────────────────────────────
+def render_current_query(db: Database, client: LLMClient | None) -> None:
+    state = st.session_state.current_query
+    if not state:
         return
 
-    state = {
-        "question": q,
-        "sql": sql,
-        "reasoning": reasoning,
-        "results": None,
-        "analysis": None,
-        "error": None,
-    }
+    mode = state.get("mode", "Query")
 
-    # 2. Auto-execute the SQL
-    if sql:
-        try:
-            with st.spinner("Running query…"):
-                columns, rows = db.query(sql)
-                state["results"] = {"columns": columns, "rows": rows}
-        except Exception as e:
-            state["error"] = f"SQL error: {e}"
+    st.markdown(
+        f'<div class="qf-question">{state["question"]}</div>',
+        unsafe_allow_html=True,
+    )
 
-    # 3. Auto-generate analysis if we have rows
-    if state["results"] and state["results"]["rows"]:
+    if state.get("error"):
+        error_block(state["error"])
+
+    if mode == "Explore":
+        _render_explore_card(state)
+        if st.button("Ask another", key="explore_new", type="secondary"):
+            st.session_state.current_query = None
+            st.rerun()
+        return
+
+    # ── Query mode ─────────────────────────────────────────────────────
+    if not state.get("sql"):
+        return
+
+    st.markdown(
+        '<div class="qf-sql-label">Generated SQL · review and edit, then Run</div>',
+        unsafe_allow_html=True,
+    )
+    sql_edit_key = f"sql_edit_{hash(state['question'])}"
+    new_sql = st.text_area(
+        "SQL",
+        value=state.get("sql", ""),
+        height=140,
+        label_visibility="collapsed",
+        key=sql_edit_key,
+    )
+    state["sql"] = new_sql
+
+    if state.get("reasoning"):
+        st.markdown(
+            f'<div class="qf-sql-reasoning">'
+            f'<span class="tag">Approach</span>'
+            f'{state["reasoning"]}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    if not state.get("results"):
+        st.caption("SQL is drafted but not executed. Press **Run query** to see results.")
+
+    b1, b2, _ = st.columns([0.2, 0.25, 1])
+    run = b1.button(
+        "Run query",
+        use_container_width=True,
+        key=f"btn_run_{sql_edit_key}",
+        type="primary",
+    )
+    new_q = b2.button(
+        "Ask another",
+        use_container_width=True,
+        key=f"btn_new_{sql_edit_key}",
+        type="secondary",
+    )
+
+    if new_q:
+        if state.get("analysis"):
+            st.session_state.history.append({
+                "question": state["question"],
+                "sql": state["sql"],
+                "summary": state["analysis"].get("summary", ""),
+            })
+        st.session_state.current_query = None
+        st.rerun()
+
+    if run:
+        _execute_and_analyze(state, db, client)
+        st.rerun()
+
+    _render_query_results(state)
+
+
+def _execute_and_analyze(state: dict[str, Any], db: Database, client: LLMClient | None) -> None:
+    state["error"] = None
+    state["analysis"] = None
+    try:
+        with st.spinner("Running query…"):
+            columns, rows = db.query(state["sql"])
+            state["results"] = {"columns": columns, "rows": rows}
+    except Exception as e:
+        state["error"] = f"SQL error: {e}"
+        state["results"] = None
+        return
+
+    if state["results"]["rows"] and client is not None:
         try:
             with st.spinner("Reading the results…"):
-                analysis = client.complete_json(
+                state["analysis"] = client.complete_json(
                     ANALYSIS_SYS,
                     analysis_user(
                         state["question"],
@@ -183,100 +312,25 @@ def process_pending_question(
                         state["results"]["columns"],
                         state["results"]["rows"],
                     ),
-                    max_tokens=1200,
+                    max_tokens=TOKENS_ANALYSIS,
                 )
-            state["analysis"] = analysis
         except Exception as e:
-            state["analysis"] = None
-            state["analysis_error"] = str(e)
-
-    st.session_state.current_query = state
+            state["analysis"] = {"summary": "", "key_findings": [], "caveats": [f"Analysis failed: {e}"]}
 
 
-# ── Render current query ─────────────────────────────────────────────────
-def render_current_query(db: Database, client: LLMClient) -> None:
-    state = st.session_state.current_query
-    if not state:
+def _render_query_results(state: dict[str, Any]) -> None:
+    results = state.get("results")
+    if results is None:
+        return
+    cols_, rows_ = results["columns"], results["rows"]
+    section_label(f"Results · {len(rows_)} row{'s' if len(rows_) != 1 else ''}")
+    if rows_:
+        df = pd.DataFrame(rows_, columns=cols_)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No rows returned for this query.")
         return
 
-    # Question header
-    st.markdown(
-        f'<div class="qf-question">{state["question"]}</div>',
-        unsafe_allow_html=True,
-    )
-
-    # SQL editor (always shown if we have an SQL string)
-    if state.get("sql") or state.get("error"):
-        st.markdown('<div class="qf-sql-label">Generated SQL · editable</div>', unsafe_allow_html=True)
-        sql_edit_key = f"sql_edit_{hash(state['question'])}"
-        new_sql = st.text_area(
-            "SQL",
-            value=state.get("sql", ""),
-            height=130,
-            label_visibility="collapsed",
-            key=sql_edit_key,
-        )
-        state["sql"] = new_sql
-
-        if state.get("reasoning"):
-            st.markdown(
-                f'<div class="qf-sql-reasoning">'
-                f'<span class="tag">Approach</span>'
-                f'{state["reasoning"]}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-        # Run / Reset buttons
-        b1, b2, _ = st.columns([0.2, 0.25, 1])
-        run = b1.button("Run query", use_container_width=True, key=f"btn_run_{sql_edit_key}", type="primary")
-        new_q = b2.button("Ask another", use_container_width=True, key=f"btn_new_{sql_edit_key}", type="secondary")
-
-        if new_q:
-            if state.get("analysis"):
-                st.session_state.history.append({
-                    "question": state["question"],
-                    "sql": state["sql"],
-                    "summary": state["analysis"].get("summary", ""),
-                })
-            st.session_state.current_query = None
-            st.rerun()
-
-        if run:
-            try:
-                with st.spinner("Running query…"):
-                    columns, rows = db.query(state["sql"])
-                    state["results"] = {"columns": columns, "rows": rows}
-                    state["analysis"] = None   # force re-analysis
-                    state["error"] = None
-                # Re-run analysis
-                if rows:
-                    with st.spinner("Reading the results…"):
-                        analysis = client.complete_json(
-                            ANALYSIS_SYS,
-                            analysis_user(state["question"], state["sql"], columns, rows),
-                            max_tokens=1200,
-                        )
-                    state["analysis"] = analysis
-                st.rerun()
-            except Exception as e:
-                state["error"] = f"SQL error: {e}"
-
-    if state.get("error"):
-        error_block(state["error"])
-
-    # Results
-    results = state.get("results")
-    if results is not None:
-        cols_, rows_ = results["columns"], results["rows"]
-        section_label(f"Results · {len(rows_)} row{'s' if len(rows_) != 1 else ''}")
-        if rows_:
-            df = pd.DataFrame(rows_, columns=cols_)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No rows returned for this query.")
-
-    # Analysis card
     analysis = state.get("analysis")
     if analysis:
         section_label("Analysis")
@@ -306,6 +360,33 @@ def render_current_query(db: Database, client: LLMClient) -> None:
         )
 
         spec = analysis.get("chart_spec")
-        if spec and state.get("results"):
-            df = pd.DataFrame(state["results"]["rows"], columns=state["results"]["columns"])
+        if spec:
             render_chart(spec, df)
+
+    # Custom chart builder, operating on the result df
+    with st.expander("+ Custom chart from these results", expanded=False):
+        custom_chart_builder(
+            key_prefix=f"cc_inline_{hash(state['question'])}",
+            result_df=df,
+        )
+
+
+def _render_explore_card(state: dict[str, Any]) -> None:
+    findings_html = "".join(
+        f'<div class="finding"><span class="num">{i:02d}</span><span>{b}</span></div>'
+        for i, b in enumerate(state.get("bullets", []), start=1)
+    )
+    extra = ""
+    if state.get("switch_to_query"):
+        extra = (
+            '<div class="caveats"><strong>Tip —</strong> '
+            'For a precise number, switch to <em>Query</em> mode and re-ask.</div>'
+        )
+    st.markdown(
+        f'<div class="qf-analysis">'
+        f'<div class="qf-analysis-headline">{state.get("answer", "")}</div>'
+        f'{findings_html}'
+        f'{extra}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )

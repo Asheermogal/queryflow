@@ -5,7 +5,7 @@ import hmac
 
 import streamlit as st
 
-from core.design import APP_NAME, APP_TAGLINE
+from core.config import APP_NAME, APP_TAGLINE
 
 
 def _password_correct(entered: str) -> bool:
@@ -21,8 +21,16 @@ def require_password() -> None:
     if st.session_state.get("authed"):
         return
 
-    if "app_password" not in st.secrets:
-        # Dev mode: no password configured.
+    # `st.secrets` raises if no secrets.toml exists at all. Treat that as
+    # dev mode (no password gate). On Streamlit Cloud secrets are always
+    # provided via the UI.
+    try:
+        has_password = "app_password" in st.secrets
+    except Exception:
+        st.session_state.authed = True
+        return
+
+    if not has_password:
         st.session_state.authed = True
         return
 

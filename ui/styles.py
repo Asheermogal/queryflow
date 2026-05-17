@@ -69,7 +69,7 @@ def inject_global_styles() -> None:
         padding-bottom: {Space.x16} !important;
       }}
 
-      /* Sidebar — keep the collapse arrow always visible */
+      /* Sidebar — fixed, non-collapsible */
       section[data-testid="stSidebar"] {{
         background: var(--c-surface) !important;
         border-right: 1px solid var(--c-border) !important;
@@ -77,31 +77,19 @@ def inject_global_styles() -> None:
       section[data-testid="stSidebar"] .block-container {{
         padding-top: {Space.x4};
       }}
-      /* Sidebar toggle — force always visible with multiple selector fallbacks */
+      /* Hide every flavor of collapse/expand control */
       [data-testid="stSidebarCollapsedControl"],
       [data-testid="collapsedControl"],
+      [data-testid="stSidebar"] [data-testid="stSidebarHeader"] button,
+      [data-testid="stSidebar"] button[kind="headerNoPadding"],
       [aria-label="Open sidebar"],
       [aria-label="Close sidebar"] {{
-        display: flex !important;
-        visibility: visible !important;
-        opacity: 1 !important;
+        display: none !important;
+        visibility: hidden !important;
       }}
-      [data-testid="stSidebarCollapsedControl"] {{
-        position: fixed !important;
-        top: 16px !important;
-        left: 16px !important;
-        z-index: 99999 !important;
-        background: var(--c-surface) !important;
-        border: 1px solid var(--c-border) !important;
-        border-radius: var(--r-sm) !important;
-        padding: 6px 8px !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
-      }}
-      [data-testid="stSidebarCollapsedControl"] button,
-      [data-testid="collapsedControl"] button {{
-        background: transparent !important;
-        border: none !important;
-        cursor: pointer !important;
+      /* Disable the drag-to-resize handle on the right edge */
+      section[data-testid="stSidebar"] > div:last-child {{
+        pointer-events: none !important;
       }}
 
       /* ── Typography ────────────────────────────────────────────────── */
@@ -422,6 +410,32 @@ def inject_global_styles() -> None:
         border-radius: var(--r-sm);
         margin-bottom: {Space.x3};
       }}
+
+      /* Dataset brief card */
+      .qf-brief-card {{
+        background: var(--c-surface);
+        border: 1px solid var(--c-border);
+        border-left: 3px solid var(--c-accent);
+        border-radius: var(--r-sm);
+        padding: 14px 16px;
+        margin: 0 0 {Space.x3} 0;
+      }}
+      .qf-brief-headline {{
+        font-family: var(--f-display);
+        font-size: {Size.md}px;
+        color: var(--c-ink);
+        line-height: 1.35;
+        margin-bottom: {Space.x2};
+      }}
+      .qf-brief-bullets {{
+        margin: 0;
+        padding: 0 0 0 18px;
+        font-family: var(--f-body);
+        font-size: {Size.sm}px;
+        color: var(--c-ink-2);
+        line-height: 1.55;
+      }}
+      .qf-brief-bullets li {{ margin-bottom: 4px; }}
 
       /* Dictionary entries */
       .qf-dict-entry {{

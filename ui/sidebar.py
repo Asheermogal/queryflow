@@ -10,9 +10,15 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core.config import (
+    ALLOWED_UPLOAD_EXTS,
+    APP_NAME,
+    MAX_UPLOAD_MB,
+    PROVIDER_DEFAULT_MODEL,
+    SOFT_WARN_UPLOAD_MB,
+)
 from ingest.database import Database, Dataset
 from ingest.loader import load_file, normalize_column_name
-from ingest.pdf_dictionary import parse_dictionary
 from llm import registry as llm_registry
 
 
@@ -38,10 +44,10 @@ def render_sidebar(db: Database) -> dict:
     with st.sidebar:
         # Brand block
         st.markdown(
-            """
+            f"""
             <div class="sb-brand">
               <span class="sb-mark">◆</span>
-              <span class="sb-name">QueryFlow AI</span>
+              <span class="sb-name">{APP_NAME}</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -91,10 +97,15 @@ def render_sidebar(db: Database) -> dict:
         model_ids = [m.id for m in models]
         id_to_display = {m.id: m.display for m in models}
 
-        # Default to first model, or previously chosen if still valid
+        # Default to (in order): previously chosen → preferred best model for
+        # this provider → first listed.
         default_model = st.session_state.get(f"model_v3__{provider_id}")
         if default_model not in model_ids:
-            default_model = model_ids[0] if model_ids else None
+            preferred = PROVIDER_DEFAULT_MODEL.get(provider_id)
+            if preferred and preferred in model_ids:
+                default_model = preferred
+            else:
+                default_model = model_ids[0] if model_ids else None
 
         model_id = st.selectbox(
             "Model",
@@ -134,54 +145,60 @@ def render_sidebar(db: Database) -> dict:
         # ── Upload ────────────────────────────────────────────────────
         with st.expander("Upload new dataset", expanded=False):
             data_file = st.file_uploader(
-                "Data file (CSV / Excel)",
-                type=["csv", "xlsx", "xls"],
+                f"Data file ({' or '.join(e.upper() for e in ALLOWED_UPLOAD_EXTS)})",
+                type=list(ALLOWED_UPLOAD_EXTS),
                 key="upload_data",
-            )
-            dict_file = st.file_uploader(
-                "Data dictionary (PDF, optional)",
-                type=["pdf"],
-                key="upload_dict",
+                help=f"Max {MAX_UPLOAD_MB} MB. CSV and XLSX only.",
             )
 
             if data_file and st.button("Load dataset", key="btn_load", use_container_width=True):
-                try:
-                    with st.spinner("Loading…"):
-                        res = load_file(data_file.getvalue(), data_file.name)
-                        existing_tables = set(db.datasets.keys())
-                        table = _table_id_from_filename(data_file.name, existing_tables)
-
-                        dataset = Dataset(
-                            table=table,
-                            name=data_file.name.rsplit(".", 1)[0],
-                            description=f"Uploaded {data_file.name} · {len(res.df):,} rows × {len(res.df.columns)} columns",
-                            row_count=len(res.df),
-                            column_count=len(res.df.columns),
-                            encoding=res.encoding,
-                            suppression_markers=res.suppression_markers_found,
-                            display_names={v: k for k, v in res.column_map.items()},
+                size_mb = len(data_file.getvalue()) / (1024 * 1024)
+                if size_mb > MAX_UPLOAD_MB:
+                    st.error(
+                        f"File is {size_mb:.1f} MB. Max allowed is {MAX_UPLOAD_MB} MB."
+                    )
+                else:
+                    if size_mb > SOFT_WARN_UPLOAD_MB:
+                        st.warning(
+                            f"Large file ({size_mb:.1f} MB). Loading may take a minute."
                         )
-                        if dict_file:
-                            parsed = parse_dictionary(
-                                dict_file.getvalue(),
-                                list(res.df.columns),
-                                dataset.display_names,
-                            )
-                            dataset.column_descriptions = parsed.column_descriptions
-                            dataset.dictionary_text = parsed.full_text
+                    try:
+                        with st.spinner("Loading…"):
+                            res = load_file(data_file.getvalue(), data_file.name)
+                            existing_tables = set(db.datasets.keys())
+                            table = _table_id_from_filename(data_file.name, existing_tables)
 
-                        db.add_dataset(res.df, dataset)
-                        st.session_state.active_table = table
-                        st.session_state.suggested_questions = None
-                        st.session_state.current_query = None
-                    st.success(f"Loaded {dataset.name}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Couldn't load: {e}")
+                            dataset = Dataset(
+                                table=table,
+                                name=data_file.name.rsplit(".", 1)[0],
+                                description=(
+                                    f"Uploaded {data_file.name} · "
+                                    f"{len(res.df):,} rows × {len(res.df.columns)} columns"
+                                ),
+                                row_count=len(res.df),
+                                column_count=len(res.df.columns),
+                                encoding=res.encoding,
+                                suppression_markers=res.suppression_markers_found,
+                                display_names={v: k for k, v in res.column_map.items()},
+                            )
+
+                            db.add_dataset(res.df, dataset)
+                            st.session_state.active_table = table
+                            st.session_state.current_query = None
+                            st.session_state.view = "chat"
+                        st.success(f"Loaded {dataset.name}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Couldn't load: {e}")
 
         # ── Reset thread ─────────────────────────────────────────────
         if st.session_state.get("history") or st.session_state.get("current_query"):
-            if st.button("Reset conversation", key="btn_reset_thread", use_container_width=True, type="secondary"):
+            if st.button(
+                "Reset conversation",
+                key="btn_reset_thread",
+                use_container_width=True,
+                type="secondary",
+            ):
                 st.session_state.history = []
                 st.session_state.current_query = None
                 st.rerun()

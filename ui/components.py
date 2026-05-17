@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core.design import APP_NAME, APP_TAGLINE, APP_VERSION
+from core.config import APP_NAME, APP_TAGLINE, APP_VERSION
 
 
 def section_label(text: str) -> None:

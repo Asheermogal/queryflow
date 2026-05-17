@@ -1,22 +1,32 @@
 """
-Right-rail dataset panel: shows dataset name, description, key stats,
-and clickable expanders for Schema and Data Dictionary.
+Right-rail dataset panel.
 
-All rendered with clean components — no leaked HTML.
+Shows dataset name + description, key stats, an LLM-generated brief, the
+schema in an expander, and the dashboard launcher.
+
+The dashboard launcher has two states:
+  - no spec cached → "Explore the dataset in a dashboard" (triggers generation)
+  - spec cached    → "Show the Dashboard" (switches view)
 """
 from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
 
+from core.dataset_brief import get_or_build_brief
 from ingest.database import Dataset
 from ingest.schema import ColumnStats
+from llm.base import LLMClient
+from ui.dashboard import ensure_dashboard_spec, get_cached_spec
 
 
-def render_dataset_overview(dataset: Dataset, stats: list[ColumnStats]) -> None:
-    """Render the full right-rail content: hero + schema + dictionary tabs."""
+def render_dataset_overview(
+    dataset: Dataset,
+    stats: list[ColumnStats],
+    client: LLMClient | None = None,
+) -> None:
+    """Right-rail content: hero + stats + brief + dashboard button + schema."""
 
-    # ── Hero: name + description + 4 stat tiles ──────────────────────
     st.markdown(
         f"""
         <div class="qf-rail-hero">
@@ -27,18 +37,15 @@ def render_dataset_overview(dataset: Dataset, stats: list[ColumnStats]) -> None:
         unsafe_allow_html=True,
     )
 
-    # 2x2 stat grid
     stats_html = (
         '<div class="qf-rail-stats">'
         f'  <div class="qf-stat"><div class="lbl">Rows</div><div class="val">{dataset.row_count:,}</div></div>'
         f'  <div class="qf-stat"><div class="lbl">Columns</div><div class="val">{dataset.column_count}</div></div>'
         f'  <div class="qf-stat"><div class="lbl">Encoding</div><div class="val">{_escape(dataset.encoding or "—")}</div></div>'
-        f'  <div class="qf-stat"><div class="lbl">Dictionary</div><div class="val">{"Loaded" if dataset.dictionary_text else "None"}</div></div>'
         "</div>"
     )
     st.markdown(stats_html, unsafe_allow_html=True)
 
-    # Suppression note (only if relevant)
     if dataset.suppression_markers:
         markers = ", ".join(f"'{m}'" for m in dataset.suppression_markers)
         st.markdown(
@@ -47,6 +54,49 @@ def render_dataset_overview(dataset: Dataset, stats: list[ColumnStats]) -> None:
             f'</div>',
             unsafe_allow_html=True,
         )
+
+    # ── Brief ────────────────────────────────────────────────────────
+    if client is not None:
+        brief = get_or_build_brief(dataset, stats, client)
+        if brief and not brief.get("_error"):
+            headline = brief.get("headline", "")
+            bullets = brief.get("bullets") or []
+            bullets_html = "".join(
+                f'<li>{_escape(b)}</li>' for b in bullets
+            )
+            st.markdown(
+                f"""
+                <div class="qf-brief-card">
+                  <div class="qf-brief-headline">{_escape(headline)}</div>
+                  <ul class="qf-brief-bullets">{bullets_html}</ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        elif brief and brief.get("_error"):
+            st.caption(f"Couldn't build brief: {brief['_error']}")
+
+    # ── Dashboard launcher ───────────────────────────────────────────
+    if client is not None:
+        spec = get_cached_spec(dataset.table)
+        if spec is None:
+            if st.button(
+                "Explore the dataset in a dashboard",
+                key=f"dash_build_{dataset.table}",
+                type="primary",
+                use_container_width=True,
+            ):
+                ensure_dashboard_spec(dataset, stats, client)
+                st.rerun()
+        else:
+            if st.button(
+                "Show the Dashboard",
+                key=f"dash_show_{dataset.table}",
+                type="primary",
+                use_container_width=True,
+            ):
+                st.session_state.view = "dashboard"
+                st.rerun()
 
     # ── Schema expander ──────────────────────────────────────────────
     with st.expander("Schema", expanded=False):
@@ -59,27 +109,12 @@ def render_dataset_overview(dataset: Dataset, stats: list[ColumnStats]) -> None:
                 "Null %": f"{s.null_pct:.1f}%",
             })
         df = pd.DataFrame(schema_rows)
-        st.dataframe(df, use_container_width=True, hide_index=True, height=min(35 * len(stats) + 38, 420))
-
-    # ── Data Dictionary expander ─────────────────────────────────────
-    with st.expander("Data dictionary", expanded=False):
-        has_descriptions = any(s.description for s in stats)
-        if has_descriptions:
-            for s in stats:
-                if s.description:
-                    label = s.display_name if s.display_name and s.display_name != s.name else s.name
-                    st.markdown(
-                        f'<div class="qf-dict-entry">'
-                        f'<div class="qf-dict-col">{_escape(label)}</div>'
-                        f'<div class="qf-dict-desc">{_escape(s.description)}</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-        else:
-            st.markdown(
-                '<div class="qf-rail-note">No data dictionary loaded for this dataset.</div>',
-                unsafe_allow_html=True,
-            )
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(35 * len(stats) + 38, 420),
+        )
 
 
 def _humanize_type(sql_type: str) -> str:

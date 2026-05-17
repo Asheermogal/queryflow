@@ -31,11 +31,14 @@ def provider_display(provider_id: str) -> str:
 def detect_provider_from_secrets(secrets) -> tuple[str | None, str | None]:
     """Inspect the secrets object and return (provider_id, api_key) for whichever
     provider has a key configured. Priority: openai > anthropic > google.
-    Returns (None, None) if no key is configured.
+    Returns (None, None) if no key is configured or no secrets file exists.
     """
     for provider_id in PROVIDERS.keys():
         key_name = SECRETS_KEYS[provider_id]
-        value = secrets.get(key_name, "") if hasattr(secrets, "get") else ""
+        try:
+            value = secrets.get(key_name, "") if hasattr(secrets, "get") else ""
+        except Exception:
+            return None, None
         if value and value.strip():
             return provider_id, value.strip()
     return None, None

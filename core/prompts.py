@@ -1,7 +1,12 @@
 """
-Prompt templates for the three LLM tasks: sample questions, SQL generation,
-result analysis. Centralized so they can be tuned independently of the
-provider implementations.
+Prompt templates for every LLM task in Data Explorer:
+  - dataset brief (one cached call per dataset, on first activation)
+  - explore (text-only insights, no SQL)
+  - SQL generation (drafted only; user must press Run)
+  - result analysis (after Run)
+  - dashboard spec (one cached call per dataset, on demand)
+
+Centralized so they can be tuned independently of the provider implementations.
 """
 from __future__ import annotations
 
@@ -9,22 +14,52 @@ import json
 from typing import Any
 
 
-# ── Sample questions ─────────────────────────────────────────────────────
-SAMPLE_QUESTIONS_SYS = """You are a data analyst helping a non-technical executive \
-explore a dataset they have just loaded. Generate 5 specific, interesting \
-starter questions a leader would actually ask. Mix difficulty: 2 simple lookups, \
-2 comparative or ranking, 1 deeper pattern. Use the schema and data dictionary \
-provided. Be concrete — reference real column names or values from the samples.
+# ── Dataset brief (cached per dataset) ───────────────────────────────────
+DATASET_BRIEF_SYS = """You are a senior data analyst. Given the schema and a few sample values from a tabular dataset, write a concise brief a non-technical executive can read in under 30 seconds.
+
+Be specific. Reference real column names. Avoid generic platitudes like "this dataset contains data".
 
 Return ONLY valid JSON in this exact shape:
-{"questions": ["...", "...", "...", "...", "..."]}"""
+{
+  "headline": "one-sentence description of what this dataset is and its grain",
+  "bullets": ["fact about the dataset", "another fact", "what kinds of questions it can answer", "..."],
+  "key_columns": ["col_a", "col_b", "col_c", "col_d", "col_e"],
+  "suggested_questions": ["specific question 1", "specific question 2", "specific question 3", "specific question 4", "specific question 5"]
+}
+
+Rules:
+- headline: 1 sentence, mention the unit of analysis (one row = ?).
+- bullets: 4 to 6 short observations (time range, geographies, scale, quirks).
+- key_columns: 3 to 5 normalized column names from the schema that are most analytically useful.
+- suggested_questions: 5 specific questions a leader would actually ask. Mix simple lookups and comparisons. Reference real column names or sample values."""
 
 
-def sample_questions_user(dataset_name: str, schema_text: str, dictionary_text: str | None) -> str:
+def dataset_brief_user(dataset_name: str, schema_text: str) -> str:
+    return f"DATASET: {dataset_name}\n\n{schema_text}\n\nWrite the brief."
+
+
+# ── Explore (text-only, no SQL) ──────────────────────────────────────────
+EXPLORE_SYS = """You are a data analyst helping a non-technical user understand a dataset without writing or running SQL.
+
+The user has asked a question about the dataset (in plain English). Using only the schema, the dataset brief, and the sample values, write a thoughtful answer.
+
+If the question can only be answered by running a query, say so honestly and recommend they switch to Query mode for that specific question.
+
+Return ONLY valid JSON:
+{
+  "answer": "a 2 to 4 sentence direct answer",
+  "bullets": ["supporting point 1", "supporting point 2", "supporting point 3"],
+  "switch_to_query": false
+}
+
+Set switch_to_query to true only if the question fundamentally requires running aggregation/filtering SQL to be answered. In that case, your answer should explain why and suggest a concrete SQL angle."""
+
+
+def explore_user(question: str, dataset_name: str, schema_text: str, brief_text: str | None) -> str:
     parts = [f"DATASET: {dataset_name}", "", schema_text]
-    if dictionary_text:
-        parts.extend(["", "DATA DICTIONARY (verbatim from source):", dictionary_text[:4000]])
-    parts.extend(["", "Generate the questions."])
+    if brief_text:
+        parts.extend(["", "DATASET BRIEF:", brief_text])
+    parts.extend(["", f"USER QUESTION: {question}"])
     return "\n".join(parts)
 
 
@@ -121,3 +156,42 @@ def analysis_user(
         f"FIRST {len(preview)} ROWS:\n{json.dumps(preview, default=str, indent=2)}\n\n"
         f"Analyze."
     )
+
+
+# ── Dashboard spec (cached per dataset) ──────────────────────────────────
+DASHBOARD_SYS = """You design a small, clean dashboard for a tabular dataset based purely on its schema and sample values.
+
+Return ONLY valid JSON in this exact shape:
+{
+  "insights": ["bullet 1", "bullet 2", "bullet 3", "bullet 4", "bullet 5", "bullet 6"],
+  "charts": [
+    {
+      "title": "Short descriptive title",
+      "chart_type": "bar" | "line" | "pie",
+      "x_column": "<exact normalized column name from schema>",
+      "y_column": "<exact normalized column name from schema OR the literal string 'count'>",
+      "aggregation": "sum" | "avg" | "count" | "min" | "max",
+      "limit": 15
+    }
+  ]
+}
+
+Rules:
+- Produce EXACTLY 6 charts.
+- The 6 charts should COVER different angles of the dataset (counts, distributions, top-N rankings, trends over time, share-of-whole). Do not produce 6 variants of the same view.
+- Use "bar" for category comparisons. Pick a categorical x and a numeric y.
+- Use "line" ONLY when there is a clear time/year/date column for x.
+- Use "pie" sparingly — only for share-of-whole with a small number of categories.
+- For "count" charts, set y_column to "count" and aggregation to "count".
+- For numeric aggregations, y_column MUST reference an actual numeric column from the schema and aggregation MUST be one of sum/avg/min/max.
+- x_column and y_column MUST be normalized column names that appear verbatim in the schema (or "count" for y).
+- limit between 8 and 25. Use smaller limits for pie charts (<=6).
+- insights: 6 short, specific bullets a leader can read out loud. Reference real columns and values from samples."""
+
+
+def dashboard_user(dataset_name: str, schema_text: str, brief_text: str | None) -> str:
+    parts = [f"DATASET: {dataset_name}", "", schema_text]
+    if brief_text:
+        parts.extend(["", "DATASET BRIEF:", brief_text])
+    parts.extend(["", "Design the dashboard."])
+    return "\n".join(parts)

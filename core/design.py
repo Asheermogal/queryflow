@@ -83,7 +83,5 @@ class Radius:
     pill = "999px"
 
 
-# ── App identity ─────────────────────────────────────────────────────────
-APP_NAME = "QueryFlow AI"
-APP_TAGLINE = "Conversational analytics for any dataset"
-APP_VERSION = "0.2"
+# App identity tokens (APP_NAME / APP_TAGLINE / APP_VERSION) live in
+# core/config.py — import from there.
