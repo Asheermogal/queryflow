@@ -24,7 +24,7 @@ SOFT_WARN_UPLOAD_MB: int = 50
 PROVIDER_DEFAULT_MODEL: dict[str, str] = {
     "anthropic": "claude-opus-4-7",
     "openai":    "gpt-5.5",
-    "google":    "gemini-2.5-pro",
+    "google":    "gemini-3.1-pro-preview",
 }
 
 # ── Dataset brief (cached, one LLM call per dataset) ─────────────────────
