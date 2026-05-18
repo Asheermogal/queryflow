@@ -107,11 +107,18 @@ def render_sidebar(db: Database) -> dict:
             else:
                 default_model = model_ids[0] if model_ids else None
 
-        model_id = st.selectbox(
+        if (
+            "model_select" not in st.session_state
+            or st.session_state.get("model_select") not in model_ids
+        ):
+            st.session_state["model_select"] = (
+                default_model if default_model in model_ids else (model_ids[0] if model_ids else None)
+            )
+
+        model_id = st.radio(
             "Model",
             options=model_ids,
             format_func=lambda mid: id_to_display.get(mid, mid),
-            index=model_ids.index(default_model) if default_model in model_ids else 0,
             key="model_select",
             label_visibility="collapsed",
         )

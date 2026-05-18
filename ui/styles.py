@@ -134,30 +134,10 @@ def inject_global_styles() -> None:
         font-weight: 500 !important;
       }}
 
-      /* ── Deep BaseWeb text color fixes ─────────────────────────────── */
-      /* These reach the nested spans / popovers that the outer .stSelectbox
-         rules never touched — fixes white-on-white text in 1.57+. */
-
-      /* Selectbox: selected value, search input, dropdown arrow */
-      .stSelectbox [data-baseweb="select"] *,
-      .stSelectbox [data-baseweb="select"] input {{
-        color: var(--c-ink) !important;
-      }}
-
-      /* Closed selectbox: readonly input / combobox value (WebKit often ignores color alone). */
-      section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] input,
-      [data-testid="stMain"] .stSelectbox [data-baseweb="select"] input,
-      .main .stSelectbox [data-baseweb="select"] input,
-      section[data-testid="stSidebar"] .stSelectbox [role="combobox"],
-      section[data-testid="stSidebar"] .stSelectbox [role="combobox"] *,
-      [data-testid="stMain"] .stSelectbox [role="combobox"],
-      [data-testid="stMain"] .stSelectbox [role="combobox"] *,
-      .main .stSelectbox [role="combobox"],
-      .main .stSelectbox [role="combobox"] * {{
-        color: var(--c-ink) !important;
-        -webkit-text-fill-color: var(--c-ink) !important;
-        caret-color: var(--c-ink) !important;
-      }}
+      /* Note: we use st.radio everywhere (plain HTML labels) instead of
+         st.selectbox so we don't have to fight Base Web's CSS-in-JS. The
+         popover/menu rules below are kept as a safety net in case any
+         future selectbox is added by accident. */
 
       /* Open dropdown menu: the popover lives at <body> root, NOT under .stSelectbox */
       [data-baseweb="popover"] [role="listbox"],

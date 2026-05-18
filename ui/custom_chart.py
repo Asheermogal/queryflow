@@ -96,31 +96,36 @@ def custom_chart_builder(
         st.info("No columns available.")
         return
 
-    cols = st.columns([0.25, 0.3, 0.25, 0.2])
-    chart_type = cols[0].selectbox(
+    row1_left, row1_right = st.columns([0.5, 0.5])
+    chart_type = row1_left.radio(
         "Chart type",
         options=CHART_TYPES,
+        horizontal=True,
         key=f"{key_prefix}_ct",
     )
-    x_col = cols[1].selectbox(
+    agg_key = f"{key_prefix}_agg"
+    if agg_key not in st.session_state:
+        st.session_state[agg_key] = AGG_FUNCS[0]
+    agg = row1_right.radio(
+        "Aggregation",
+        options=AGG_FUNCS,
+        horizontal=True,
+        key=agg_key,
+    )
+
+    row2_left, row2_right = st.columns([0.5, 0.5])
+    x_col = row2_left.radio(
         "X (category / time)",
         options=all_cols,
         key=f"{key_prefix}_x",
     )
 
-    agg = cols[2].selectbox(
-        "Aggregation",
-        options=AGG_FUNCS,
-        index=0,
-        key=f"{key_prefix}_agg",
-    )
-
     if agg == "count":
         y_col = None
-        cols[3].caption("y = COUNT(*)")
+        row2_right.caption("y = COUNT(*)")
     else:
         y_options = num_cols or all_cols
-        y_col = cols[3].selectbox(
+        y_col = row2_right.radio(
             "Y (numeric)",
             options=y_options,
             key=f"{key_prefix}_y",
