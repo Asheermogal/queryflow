@@ -137,57 +137,53 @@ def custom_chart_builder(
     if not st.button("Build chart", key=f"{key_prefix}_build", type="primary"):
         return
 
-    if source == "result":
-        plot_df = result_df.copy()
-        # Aggregate on the fly
-        if agg == "count":
-            agg_df = (
-                plot_df.groupby(x_col, dropna=True).size().reset_index(name="value")
-            )
+    try:
+        if source == "result":
+            plot_df = result_df.copy()
+            if agg == "count":
+                agg_df = (
+                    plot_df.groupby(x_col, dropna=True).size().reset_index(name="value")
+                )
+            else:
+                if y_col is None or y_col not in plot_df.columns:
+                    st.warning("Pick a y column.")
+                    return
+                plot_df[y_col] = pd.to_numeric(plot_df[y_col], errors="coerce")
+                plot_df = plot_df[plot_df[y_col].notna()]
+                pandas_agg = "mean" if agg == "avg" else agg
+                agg_df = (
+                    plot_df.groupby(x_col, dropna=True)[y_col]
+                    .agg(pandas_agg)
+                    .reset_index()
+                    .rename(columns={y_col: "value"})
+                )
+            if chart_type == "line":
+                agg_df = agg_df.sort_values(x_col).head(limit)
+            else:
+                agg_df = agg_df.sort_values("value", ascending=False).head(limit)
         else:
-            if y_col is None or y_col not in plot_df.columns:
-                st.error("Pick a y column.")
+            sql = _build_full_table_sql(table, x_col, y_col, agg, chart_type, limit)
+            try:
+                with st.spinner("Aggregating…"):
+                    columns, rows = db.query(sql)
+                    agg_df = pd.DataFrame(rows, columns=columns)
+            except Exception as e:
+                st.warning(f"Couldn't build chart: {e}")
+                with st.expander("SQL"):
+                    st.code(sql, language="sql")
                 return
-            plot_df[y_col] = pd.to_numeric(plot_df[y_col], errors="coerce")
-            plot_df = plot_df[plot_df[y_col].notna()]
-            pandas_agg = "mean" if agg == "avg" else agg
-            agg_df = (
-                plot_df.groupby(x_col, dropna=True)[y_col]
-                .agg(pandas_agg)
-                .reset_index()
-                .rename(columns={y_col: "value"})
-            )
-        if chart_type == "line":
-            agg_df = agg_df.sort_values(x_col).head(limit)
-        else:
-            agg_df = agg_df.sort_values("value", ascending=False).head(limit)
-    else:
-        sql = _build_full_table_sql(table, x_col, y_col, agg, chart_type, limit)
-        try:
-            with st.spinner("Aggregating…"):
-                columns, rows = db.query(sql)
-                agg_df = pd.DataFrame(rows, columns=columns)
-        except Exception as e:
-            st.error(f"Couldn't build chart: {e}")
-            with st.expander("SQL"):
-                st.code(sql, language="sql")
+
+        if agg_df.empty:
+            st.info("No rows after aggregation.")
             return
 
-    if agg_df.empty:
-        st.info("No rows after aggregation.")
-        return
-
-    spec = {
-        "chart_type": chart_type,
-        "title": f"{agg.upper()}({y_col or '*'}) by {x_col}",
-        "x_column": x_col if source == "table" else x_col,
-        "y_column": "value" if source == "table" else "value",
-        "limit": int(limit),
-    }
-    # render_chart expects the y column to be named in the df itself.
-    if source == "result":
-        spec["x_column"] = x_col
-        agg_df = agg_df.rename(columns={x_col: x_col})
-    else:
-        spec["x_column"] = "x"
-    render_chart(spec, agg_df)
+        spec = {
+            "chart_type": chart_type,
+            "title": f"{agg.upper()}({y_col or '*'}) by {x_col}",
+            "x_column": x_col if source == "result" else "x",
+            "y_column": "value",
+            "limit": int(limit),
+        }
+        render_chart(spec, agg_df)
+    except Exception as e:
+        st.warning(f"Couldn't build that chart: {e}")

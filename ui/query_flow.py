@@ -106,14 +106,19 @@ def render_input(client_ready: bool) -> None:
         )
     with cols[1]:
         send_label = "Explore" if mode == "Explore" else "Draft SQL"
+        send_disabled = (
+            not client_ready
+            or not (question or "").strip()
+            or bool(st.session_state.get("pending_run_question"))
+        )
         send = st.button(
             send_label,
             use_container_width=True,
-            disabled=not client_ready,
+            disabled=send_disabled,
             type="primary",
         )
 
-    if send and question.strip():
+    if send and question and question.strip():
         st.session_state.pending_run_question = {"q": question.strip(), "mode": mode}
         st.rerun()
 
@@ -259,11 +264,13 @@ def render_current_query(db: Database, client: LLMClient | None) -> None:
         st.caption("SQL is drafted but not executed. Press **Run query** to see results.")
 
     b1, b2, _ = st.columns([0.2, 0.25, 1])
+    run_disabled = not (new_sql or "").strip()
     run = b1.button(
         "Run query",
         use_container_width=True,
         key=f"btn_run_{sql_edit_key}",
         type="primary",
+        disabled=run_disabled,
     )
     new_q = b2.button(
         "Ask another",
@@ -292,9 +299,13 @@ def render_current_query(db: Database, client: LLMClient | None) -> None:
 def _execute_and_analyze(state: dict[str, Any], db: Database, client: LLMClient | None) -> None:
     state["error"] = None
     state["analysis"] = None
+    sql = (state.get("sql") or "").strip()
+    if not sql:
+        state["error"] = "Enter some SQL before running."
+        return
     try:
         with st.spinner("Running query…"):
-            columns, rows = db.query(state["sql"])
+            columns, rows = db.query(sql)
             state["results"] = {"columns": columns, "rows": rows}
     except Exception as e:
         state["error"] = f"SQL error: {e}"

@@ -134,6 +134,47 @@ def inject_global_styles() -> None:
         font-weight: 500 !important;
       }}
 
+      /* ── Deep BaseWeb text color fixes ─────────────────────────────── */
+      /* These reach the nested spans / popovers that the outer .stSelectbox
+         rules never touched — fixes white-on-white text in 1.57+. */
+
+      /* Selectbox: selected value, search input, dropdown arrow */
+      .stSelectbox [data-baseweb="select"] *,
+      .stSelectbox [data-baseweb="select"] input {{
+        color: var(--c-ink) !important;
+      }}
+
+      /* Open dropdown menu: the popover lives at <body> root, NOT under .stSelectbox */
+      [data-baseweb="popover"] [role="listbox"],
+      [data-baseweb="popover"] [role="listbox"] *,
+      [data-baseweb="menu"] [role="option"],
+      [data-baseweb="menu"] [role="option"] * {{
+        color: var(--c-ink) !important;
+        background-color: var(--c-surface) !important;
+      }}
+      [data-baseweb="menu"] [role="option"]:hover,
+      [data-baseweb="menu"] [role="option"][aria-selected="true"] {{
+        background-color: var(--c-surface-2) !important;
+      }}
+
+      /* Radio (Explore / Query toggle and similar) */
+      [data-testid="stRadio"] label,
+      [data-testid="stRadio"] label * {{
+        color: var(--c-ink) !important;
+      }}
+
+      /* Text input + textarea placeholders */
+      .stTextInput input::placeholder,
+      .stTextArea textarea::placeholder {{
+        color: var(--c-ink-muted) !important;
+        opacity: 1 !important;
+      }}
+
+      /* Slider value label (custom chart builder uses it) */
+      [data-testid="stSlider"] [data-baseweb] * {{
+        color: var(--c-ink) !important;
+      }}
+
       /* Buttons — primary (filled dark) */
       .stButton > button[kind="primary"] {{
         background: var(--c-ink) !important;
