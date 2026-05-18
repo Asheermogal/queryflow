@@ -144,6 +144,21 @@ def inject_global_styles() -> None:
         color: var(--c-ink) !important;
       }}
 
+      /* Closed selectbox: readonly input / combobox value (WebKit often ignores color alone). */
+      section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] input,
+      [data-testid="stMain"] .stSelectbox [data-baseweb="select"] input,
+      .main .stSelectbox [data-baseweb="select"] input,
+      section[data-testid="stSidebar"] .stSelectbox [role="combobox"],
+      section[data-testid="stSidebar"] .stSelectbox [role="combobox"] *,
+      [data-testid="stMain"] .stSelectbox [role="combobox"],
+      [data-testid="stMain"] .stSelectbox [role="combobox"] *,
+      .main .stSelectbox [role="combobox"],
+      .main .stSelectbox [role="combobox"] * {{
+        color: var(--c-ink) !important;
+        -webkit-text-fill-color: var(--c-ink) !important;
+        caret-color: var(--c-ink) !important;
+      }}
+
       /* Open dropdown menu: the popover lives at <body> root, NOT under .stSelectbox */
       [data-baseweb="popover"] [role="listbox"],
       [data-baseweb="popover"] [role="listbox"] *,
